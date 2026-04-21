@@ -5557,6 +5557,45 @@ namespace metalpetal {
         }
     }
     
+    /// Spherical fisheye projection (equidistant). `fisheyeMode`: 0 = identity, 1 = wide (modifier 0.59), 2 = full (modifier 1.0, outside circle is opaque black).
+    kernel void fisheyeEffect(texture2d<float, access::read> inputTexture [[texture(0)]],
+                              texture2d<float, access::write> outputTexture [[texture(1)]],
+                              constant int &fisheyeMode [[buffer(0)]],
+                              uint2 gid [[thread_position_in_grid]]) {
+        uint width = outputTexture.get_width();
+        uint height = outputTexture.get_height();
+        if (gid.x >= width || gid.y >= height) {
+            return;
+        }
+        float2 size = float2(float(width), float(height));
+        float2 uv = (float2(gid) * 2.0f / size) - float2(1.0f);
+        int mode = fisheyeMode;
+        float modifier = 0.0f;
+        if (mode == 2) {
+            modifier = 1.0f;
+        } else if (mode == 1) {
+            modifier = 0.59f;
+        }
+        float d = length(uv) / (2.0f - modifier);
+        if (d > 1.0f && mode == 2) {
+            outputTexture.write(float4(0.0f, 0.0f, 0.0f, 1.0f), gid);
+            return;
+        }
+        float z = sqrt(max(0.0f, 1.0f - d * d));
+        float r = atan2(d, z) / M_PI_F;
+        float phi = atan2(uv.y, uv.x);
+        float2 fisheyeUV = float2(r * cos(phi) + 0.5f, r * sin(phi) + 0.5f);
+        float4 color;
+        if (mode == 1 || mode == 2) {
+            float2 sampleCoord = fisheyeUV * size;
+            float2 clamped = clamp(sampleCoord, float2(0.0f), size - float2(1.0f));
+            color = inputTexture.read(uint2(clamped));
+        } else {
+            color = inputTexture.read(gid);
+        }
+        outputTexture.write(color, gid);
+    }
+    
     fragment float4 colorLookup3D(VertexOut vertexIn [[stage_in]],
                                   texture2d<float, access::sample> sourceTexture [[texture(0)]],
                                   texture3d<float, access::sample> lutTexture [[texture(1)]],
