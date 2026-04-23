@@ -13,6 +13,7 @@
 #import "MTICropFilter.h"
 #import "MTIDotScreenFilter.h"
 #import "MTIFilter.h"
+#import "MTIFisheyeFilter.h"
 #import "MTIHexagonalBokehBlurFilter.h"
 #import "MTIHighPassSkinSmoothingFilter.h"
 #import "MTIImage+Filters.h"
