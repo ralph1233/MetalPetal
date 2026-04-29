@@ -5617,7 +5617,7 @@ namespace metalpetal {
             //   z = sqrt(1 - d^2)
             //   r = atan2(d, z) / pi                (0 .. 0.5)
             //   uv' = r * (cos(phi), sin(phi))      ∈ [-0.5, 0.5]^2
-            const float K_WIDE = 1.0f;
+            const float K_WIDE = 1.05f;
             const float rMax   = 1.41421356f; // sqrt(2)
             float2 uv = (float2(gid) * 2.0f / size) - float2(1.0f);
             // Clamp just under 1 so sqrt(1 - d^2) stays > 0 at the corner
