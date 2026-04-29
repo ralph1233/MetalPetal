@@ -5557,6 +5557,87 @@ namespace metalpetal {
         }
     }
     
+    /// Fisheye projection. `fisheyeMode`:
+    ///   0 = identity (passthrough)
+    ///   1 = wide-angle BARREL distortion via equidistant fisheye projection
+    ///       (Dazz-Cam style). Fills the whole rectangle, never black,
+    ///       lines bow OUTWARD from centre. K_WIDE controls strength:
+    ///       0.7 subtle, 1.0 Dazz-like, 1.2 heavy.
+    ///   2 = full / circular fisheye. Isotropic disc inscribed in the
+    ///       smaller side; pixels outside the disc are opaque black.
+    ///       No aspect-ratio stretching.
+    ///
+    /// Keep the math here in sync with package/examples/LUTEffect.metal so
+    /// the live preview and the exported video match.
+    kernel void fisheyeEffect(texture2d<float, access::read> inputTexture [[texture(0)]],
+                              texture2d<float, access::write> outputTexture [[texture(1)]],
+                              constant int &fisheyeMode [[buffer(0)]],
+                              uint2 gid [[thread_position_in_grid]]) {
+        uint width = outputTexture.get_width();
+        uint height = outputTexture.get_height();
+        if (gid.x >= width || gid.y >= height) {
+            return;
+        }
+        float2 size = float2(float(width), float(height));
+        float2 center = size * 0.5f;
+        int mode = fisheyeMode;
+
+        if (mode == 2) {
+            // True circular fisheye. Normalise uv isotropically against the
+            // smaller side so the disc d <= 1 is a perfect circle inscribed
+            // in the texture, and sample with the same metric so the warp
+            // does not stretch with the frame's aspect ratio. Outside the
+            // disc is opaque black (classic "circular fisheye" look).
+            float halfMin = min(size.x, size.y) * 0.5f;
+            float2 uv = (float2(gid) - center) / halfMin;
+            float d = length(uv);
+            if (d > 1.0f) {
+                outputTexture.write(float4(0.0f, 0.0f, 0.0f, 1.0f), gid);
+                return;
+            }
+            float z = sqrt(max(0.0f, 1.0f - d * d));
+            float r = atan2(d, z) / M_PI_F;
+            float phi = atan2(uv.y, uv.x);
+            float2 sampleOffset = halfMin * float2(r * cos(phi), r * sin(phi));
+            int2 samplePos = int2(center + sampleOffset);
+            samplePos = clamp(samplePos,
+                              int2(0),
+                              int2(int(width) - 1, int(height) - 1));
+            outputTexture.write(inputTexture.read(uint2(samplePos)), gid);
+            return;
+        }
+
+        if (mode == 1) {
+            // Wide-angle BARREL distortion via the equidistant fisheye
+            // projection. Real-lens model: project the scene onto a unit
+            // hemisphere then back onto the image plane. Straight lines bow
+            // outward, fills the rectangle, never black.
+            //
+            //   d = |uv| * K / sqrt(2)              (clamped < 1)
+            //   z = sqrt(1 - d^2)
+            //   r = atan2(d, z) / pi                (0 .. 0.5)
+            //   uv' = r * (cos(phi), sin(phi))      ∈ [-0.5, 0.5]^2
+            const float K_WIDE = 1.0f;
+            const float rMax   = 1.41421356f; // sqrt(2)
+            float2 uv = (float2(gid) * 2.0f / size) - float2(1.0f);
+            // Clamp just under 1 so sqrt(1 - d^2) stays > 0 at the corner
+            // pixel when K_WIDE = 1.
+            float d = clamp(length(uv) * K_WIDE / rMax, 0.0f, 0.9999f);
+            float z = sqrt(1.0f - d * d);
+            float r = atan2(d, z) / M_PI_F;
+            float phi = atan2(uv.y, uv.x);
+            float2 fisheyeUV = float2(r * cos(phi) + 0.5f,
+                                      r * sin(phi) + 0.5f);
+            float2 sampleCoord = fisheyeUV * size;
+            float2 clamped = clamp(sampleCoord, float2(0.0f), size - float2(1.0f));
+            outputTexture.write(inputTexture.read(uint2(clamped)), gid);
+            return;
+        }
+
+        // mode 0: identity
+        outputTexture.write(inputTexture.read(gid), gid);
+    }
+    
     fragment float4 colorLookup3D(VertexOut vertexIn [[stage_in]],
                                   texture2d<float, access::sample> sourceTexture [[texture(0)]],
                                   texture3d<float, access::sample> lutTexture [[texture(1)]],
